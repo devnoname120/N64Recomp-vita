@@ -67,7 +67,27 @@ static inline void DMULTU(uint64_t a, uint64_t b, uint64_t* lo64, uint64_t* hi64
 }
 
 #else
-#error "128-bit integer type not found"
+// ARMv7 does not expose a 128-bit integer type. Form the full product from
+// 32-bit limbs; all intermediates fit in uint64_t, including the carries.
+static inline void DMULTU(uint64_t a, uint64_t b, uint64_t* lo64, uint64_t* hi64) {
+    const uint64_t a0 = (uint32_t)a, a1 = a >> 32;
+    const uint64_t b0 = (uint32_t)b, b1 = b >> 32;
+    const uint64_t low = a0 * b0;
+    const uint64_t middle0 = a1 * b0 + (low >> 32);
+    const uint64_t middle1 = a0 * b1 + (uint32_t)middle0;
+    *lo64 = (middle1 << 32) | (uint32_t)low;
+    *hi64 = a1 * b1 + (middle0 >> 32) + (middle1 >> 32);
+}
+
+static inline void DMULT(int64_t a, int64_t b, int64_t* lo64, int64_t* hi64) {
+    uint64_t low, high;
+    DMULTU((uint64_t)a, (uint64_t)b, &low, &high);
+    // Correct the high half of the unsigned product for two's complement.
+    high -= a < 0 ? (uint64_t)b : 0;
+    high -= b < 0 ? (uint64_t)a : 0;
+    *lo64 = (int64_t)low;
+    *hi64 = (int64_t)high;
+}
 #endif
 
 static inline void DDIV(int64_t a, int64_t b, int64_t* quot, int64_t* rem) {
@@ -92,24 +112,32 @@ typedef uint64_t gpr;
 #define SUB32(a, b) \
     ((gpr)(int32_t)((a) - (b)))
 
+#if defined(__vita__) || defined(RECOMP_MIRROR_KSEG1)
+// KSEG0 and KSEG1 refer to the same physical memory. A 32-bit host cannot
+// reserve the address-space aliases used by desktop runtimes.
+#define RECOMP_RDRAM_OFFSET(address) ((uint32_t)(address) & 0x1FFFFFFFU)
+#else
+#define RECOMP_RDRAM_OFFSET(address) ((address) - 0xFFFFFFFF80000000)
+#endif
+
 #define MEM_W(offset, reg) \
-    (*(int32_t*)(rdram + ((((reg) + (offset))) - 0xFFFFFFFF80000000)))
+    (*(int32_t*)(rdram + RECOMP_RDRAM_OFFSET((reg) + (offset))))
 
 #define MEM_H(offset, reg) \
-    (*(int16_t*)(rdram + ((((reg) + (offset)) ^ 2) - 0xFFFFFFFF80000000)))
+    (*(int16_t*)(rdram + RECOMP_RDRAM_OFFSET(((reg) + (offset)) ^ 2)))
 
 #define MEM_B(offset, reg) \
-    (*(int8_t*)(rdram + ((((reg) + (offset)) ^ 3) - 0xFFFFFFFF80000000)))
+    (*(int8_t*)(rdram + RECOMP_RDRAM_OFFSET(((reg) + (offset)) ^ 3)))
 
 #define MEM_HU(offset, reg) \
-    (*(uint16_t*)(rdram + ((((reg) + (offset)) ^ 2) - 0xFFFFFFFF80000000)))
+    (*(uint16_t*)(rdram + RECOMP_RDRAM_OFFSET(((reg) + (offset)) ^ 2)))
 
 #define MEM_BU(offset, reg) \
-    (*(uint8_t*)(rdram + ((((reg) + (offset)) ^ 3) - 0xFFFFFFFF80000000)))
+    (*(uint8_t*)(rdram + RECOMP_RDRAM_OFFSET(((reg) + (offset)) ^ 3)))
 
 #define SD(val, offset, reg) { \
-    *(uint32_t*)(rdram + ((((reg) + (offset) + 4)) - 0xFFFFFFFF80000000)) = (uint32_t)((gpr)(val) >> 0); \
-    *(uint32_t*)(rdram + ((((reg) + (offset) + 0)) - 0xFFFFFFFF80000000)) = (uint32_t)((gpr)(val) >> 32); \
+    *(uint32_t*)(rdram + RECOMP_RDRAM_OFFSET((reg) + (offset) + 4)) = (uint32_t)((gpr)(val) >> 0); \
+    *(uint32_t*)(rdram + RECOMP_RDRAM_OFFSET((reg) + (offset))) = (uint32_t)((gpr)(val) >> 32); \
 }
 
 static inline uint64_t load_doubleword(uint8_t* rdram, gpr reg, gpr offset) {
