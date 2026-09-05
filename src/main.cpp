@@ -472,6 +472,7 @@ int main(int argc, char** argv) {
 
     fmt::print(func_header_file,
         "{}\n"
+        "#define RECOMP_GENERATED_WRITE_TRACKING 1\n"
         "\n"
         "#ifdef __cplusplus\n"
         "extern \"C\" {{\n"

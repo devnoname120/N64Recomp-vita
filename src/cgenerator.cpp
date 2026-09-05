@@ -615,8 +615,8 @@ void N64Recomp::CGenerator::process_store_op(const StoreOp& op, const Instructio
             syntax = StoreSyntax::FuncWithRdram;
             break;
         case StoreOpType::SW:
-            func_text = "MEM_W";
-            syntax = StoreSyntax::Assignment;
+            func_text = "do_sw";
+            syntax = StoreSyntax::FuncWithRdram;
             break;
         case StoreOpType::SWL:
             func_text = "do_swl";
@@ -627,20 +627,20 @@ void N64Recomp::CGenerator::process_store_op(const StoreOp& op, const Instructio
             syntax = StoreSyntax::FuncWithRdram;
             break;
         case StoreOpType::SH:
-            func_text = "MEM_H";
-            syntax = StoreSyntax::Assignment;
+            func_text = "do_sh";
+            syntax = StoreSyntax::FuncWithRdram;
             break;
         case StoreOpType::SB:
-            func_text = "MEM_B";
-            syntax = StoreSyntax::Assignment;
+            func_text = "do_sb";
+            syntax = StoreSyntax::FuncWithRdram;
             break;
         case StoreOpType::SDC1:
             func_text = "SD";
             syntax = StoreSyntax::Func;
             break;
         case StoreOpType::SWC1:
-            func_text = "MEM_W";
-            syntax = StoreSyntax::Assignment;
+            func_text = "do_sw";
+            syntax = StoreSyntax::FuncWithRdram;
             break;
         default:
             throw std::runtime_error("Unhandled store op");

@@ -103,6 +103,32 @@ static inline void DDIVU(uint64_t a, uint64_t b, uint64_t* quot, uint64_t* rem) 
 
 typedef uint64_t gpr;
 
+#ifdef RECOMP_TRACK_MEMORY_WRITES
+#ifdef __cplusplus
+extern "C" {
+#endif
+// One byte per physical 4 KiB page. The runtime enables only watched pages.
+extern uint8_t recomp_watched_pages[0x20000];
+void recomp_record_memory_write(uint8_t *rdram, uint32_t address, uint32_t size);
+#ifdef __cplusplus
+}
+#endif
+static inline void recomp_notify_memory_write(uint8_t *rdram, gpr address, uint32_t size) {
+    uint32_t physical = (uint32_t)address & 0x1fffffffU;
+    if (!size || size > 0x20000000U - physical) return;
+    uint32_t last = (physical + size - 1) >> 12;
+    for (uint32_t page = physical >> 12; page <= last; ++page) {
+        if (__atomic_load_n(&recomp_watched_pages[page], __ATOMIC_RELAXED)) {
+            recomp_record_memory_write(rdram, physical, size);
+            break;
+        }
+    }
+}
+#define RECOMP_NOTIFY_WRITE(address, size) recomp_notify_memory_write(rdram, (address), (size))
+#else
+#define RECOMP_NOTIFY_WRITE(address, size) ((void)0)
+#endif
+
 #define SIGNED(val) \
     ((int64_t)(val))
 
@@ -135,9 +161,23 @@ typedef uint64_t gpr;
 #define MEM_BU(offset, reg) \
     (*(uint8_t*)(rdram + RECOMP_RDRAM_OFFSET(((reg) + (offset)) ^ 3)))
 
+static inline void do_sw(uint8_t *rdram, gpr offset, gpr reg, gpr val) {
+    MEM_W(offset, reg) = (uint32_t)val;
+    RECOMP_NOTIFY_WRITE(reg + offset, 4);
+}
+static inline void do_sh(uint8_t *rdram, gpr offset, gpr reg, gpr val) {
+    MEM_H(offset, reg) = (uint16_t)val;
+    RECOMP_NOTIFY_WRITE(reg + offset, 2);
+}
+static inline void do_sb(uint8_t *rdram, gpr offset, gpr reg, gpr val) {
+    MEM_B(offset, reg) = (uint8_t)val;
+    RECOMP_NOTIFY_WRITE(reg + offset, 1);
+}
+
 #define SD(val, offset, reg) { \
     *(uint32_t*)(rdram + RECOMP_RDRAM_OFFSET((reg) + (offset) + 4)) = (uint32_t)((gpr)(val) >> 0); \
     *(uint32_t*)(rdram + RECOMP_RDRAM_OFFSET((reg) + (offset))) = (uint32_t)((gpr)(val) >> 32); \
+    RECOMP_NOTIFY_WRITE((reg) + (offset), 8); \
 }
 
 static inline uint64_t load_doubleword(uint8_t* rdram, gpr reg, gpr offset) {
@@ -198,6 +238,7 @@ static inline void do_swl(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
     uint32_t masked_initial_value = initial_value & ~(0xFFFFFFFFu >> (misalignment * 8));
     uint32_t shifted_input_value = ((uint32_t)val) >> (misalignment * 8);
     MEM_W(0, word_address) = masked_initial_value | shifted_input_value;
+    RECOMP_NOTIFY_WRITE(address, 4 - misalignment);
 }
 
 static inline void do_swr(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
@@ -213,6 +254,7 @@ static inline void do_swr(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
     uint32_t masked_initial_value = initial_value & ~(0xFFFFFFFFu << (24 - misalignment * 8));
     uint32_t shifted_input_value = ((uint32_t)val) << (24 - misalignment * 8);
     MEM_W(0, word_address) = masked_initial_value | shifted_input_value;
+    RECOMP_NOTIFY_WRITE(word_address, misalignment + 1);
 }
 
 static inline gpr do_ldl(uint8_t* rdram, gpr initial_value, gpr offset, gpr reg) {
@@ -266,6 +308,7 @@ static inline void do_sdl(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
 
     MEM_W(0, dword_address + 4) = lo;
     MEM_W(0, dword_address + 0) = hi;
+    RECOMP_NOTIFY_WRITE(address, 8 - misalignment);
 }
 
 static inline void do_sdr(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
@@ -287,6 +330,7 @@ static inline void do_sdr(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
 
     MEM_W(0, dword_address + 4) = lo;
     MEM_W(0, dword_address + 0) = hi;
+    RECOMP_NOTIFY_WRITE(dword_address, misalignment + 1);
 }
 
 static inline uint32_t get_cop1_cs() {
