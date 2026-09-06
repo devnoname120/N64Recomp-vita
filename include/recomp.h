@@ -435,7 +435,16 @@ static inline void set_cop1_cs(uint32_t val) {
 
 static inline int32_t do_cvt_w_s(float val) {
     // Rounding mode aware float to 32-bit int conversion.
+#if defined(__vita__) && defined(__arm__)
+    // VFP's integer conversion follows FPSCR directly, including directed
+    // rounding for small values that the SDK's software lrint path loses.
+    int32_t result;
+    __asm__ volatile("vcvtr.s32.f32 s15, %1\n\tvmov %0, s15"
+        : "=r"(result) : "t"(val) : "s15", "memory");
+    return result;
+#else
     return (int32_t)lrintf(val);
+#endif
 }
 
 #define CVT_W_S(val) \
@@ -451,7 +460,14 @@ static inline int64_t do_cvt_l_s(float val) {
 
 static inline int32_t do_cvt_w_d(double val) {
     // Rounding mode aware double to 32-bit int conversion.
+#if defined(__vita__) && defined(__arm__)
+    int32_t result;
+    __asm__ volatile("vcvtr.s32.f64 s15, %P1\n\tvmov %0, s15"
+        : "=r"(result) : "w"(val) : "s15", "memory");
+    return result;
+#else
     return (int32_t)lrint(val);
+#endif
 }
 
 #define CVT_W_D(val) \
